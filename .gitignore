@@ -1,0 +1,6 @@
+./Dataset
+*.out
+*.sh
+*.err
+*.obj
+*.h5
