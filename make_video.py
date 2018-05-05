@@ -16,7 +16,7 @@ images = []
 for data in datas:
     
     general_img_dir = data['img_dir']
-    
+    print(general_img_dir)
     frame_1 = 0
     frame_2 = 1
     frame_3 = 2

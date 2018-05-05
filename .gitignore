@@ -1,4 +1,5 @@
 ./Dataset
+./__pycache__
 *.out
 *.sh
 *.err

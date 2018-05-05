@@ -3,7 +3,7 @@ import numpy as np
 import os
 from tracker import *
 
-img_dir = './Dataset/MOT/images/train/MOT17-13/img1/'
+img_dir = './Dataset/MOT/images/train/MOT17-02/img1/'
 
 frame_1 = 0
 frame_2 = 1
