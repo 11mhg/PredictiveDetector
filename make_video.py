@@ -1,7 +1,7 @@
 import tensorflow as tf
 import numpy as np
 import os
-from tracker import *
+from pod import *
 from preprocess import *
 
 datas = process_MOT_dataset()
@@ -10,7 +10,7 @@ datas = process_MOT_dataset()
 datas = datas[0:1]
 
 
-t = Tracker()
+t = Pod()
 
 images = []
 for data in datas:
@@ -29,7 +29,7 @@ for data in datas:
     while(True):
         counter += 1
         if counter%100 ==0:
-            t=Tracker() 
+            t=Pod() 
         frame_1 +=1
         frame_2 +=1
         frame_3 +=1

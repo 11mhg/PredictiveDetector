@@ -9,8 +9,7 @@ from keras.layers.merge import concatenate
 from keras.models import Model
 
 from ..utils import compose
-from .keras_darknet19 import (DarknetConv2D, DarknetConv2D_BN_Leaky,
-                              darknet_body)
+from .keras_darknet19 import *
 
 sys.path.append('..')
 
@@ -43,15 +42,14 @@ def space_to_depth_x2_output_shape(input_shape):
 
 
 def yolo_body(inputs, num_anchors, num_classes):
-    """Create YOLO_V2 model CNN body in Keras."""
-    darknet = Model(inputs, darknet_body()(inputs))
+    ''' Create PODnet body ''' 
+    podnet = Model(inputs, PODnet_body()(inputs))
     conv20 = compose(
         DarknetConv2D_BN_Leaky(1024, (3, 3)),
-        DarknetConv2D_BN_Leaky(1024, (3, 3)))(darknet.output)
+        DarknetConv2D_BN_Leaky(1024, (3, 3)))(podnet.output)
 
-    conv13 = darknet.layers[43].output
+    conv13 = podnet.layers[43].output
     conv21 = DarknetConv2D_BN_Leaky(64, (1, 1))(conv13)
-    # TODO: Allow Keras Lambda to use func arguments for output_shape?
     conv21_reshaped = Lambda(
         space_to_depth_x2,
         output_shape=space_to_depth_x2_output_shape,
@@ -200,7 +198,6 @@ def yolo_loss(args,
         yolo_output, anchors, num_classes)
 
     # Unadjusted box predictions for loss.
-    # TODO: Remove extra computation shared with yolo_head.
     yolo_output_shape = K.shape(yolo_output)
     feats = K.reshape(yolo_output, [
         -1, yolo_output_shape[1], yolo_output_shape[2], num_anchors,
@@ -208,9 +205,6 @@ def yolo_loss(args,
     ])
     pred_boxes = K.concatenate(
         (K.sigmoid(feats[..., 0:2]), feats[..., 2:4]), axis=-1)
-
-    # TODO: Adjust predictions by image width/height for non-square images?
-    # IOUs may be off due to different aspect ratio.
 
     # Expand pred x,y,w,h to allow comparison with ground truth.
     # batch, conv_height, conv_width, num_anchors, num_true_boxes, box_params

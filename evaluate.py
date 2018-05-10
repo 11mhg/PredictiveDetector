@@ -5,7 +5,7 @@ from preprocess import *
 from keras import backend as K
 from keras.models import load_model
 from PIL import Image, ImageDraw, ImageFont
-from tracker import *
+from pod import *
 import numpy as np
 import matplotlib as mpl
 mpl.use('Agg')
@@ -29,7 +29,7 @@ def evaluate_map(frames,nb_class):
     print("Mean average precision : {:0.2f}".format(sum(mean_average_precision)/len(mean_average_precision)))
 
 def evaluate():
-    model_path = "tracker.h5"
+    model_path = "pod.h5"
     classes_path = "model_data/mot_classes.txt"
     anchors_path = "model_data/mot_anchors.txt"
 
@@ -54,12 +54,12 @@ def evaluate():
         img_dir = video['img_dir']
         counter = 0
         K.clear_session()
-        t=Tracker()
+        t=Pod()
         for frame_id in sorted(video['frame'].keys()):
             if (frame_id%50==0):
                 break
                 K.clear_session()
-                t=Tracker()
+                t=Pod()
             if (frame_id==len(video['frame'])-1):
                 break
             counter+=1

@@ -1,11 +1,11 @@
 import os
 import argparse
-from tracker import *
+from pod import *
 from PIL import Image
 
 # Args
 argparser = argparse.ArgumentParser(
-            description="Get Intermediary Output from Tracker network")
+            description="Get Intermediary Output from Pod network")
 
 argparser.add_argument(
             '-l',
@@ -17,8 +17,8 @@ argparser.add_argument(
 
 def main(args):
     img_dir = './Dataset/MOT/images/train/MOT17-02/img1/'
-    t = Tracker()
-    t.model_body.load_weights('tracker_weights_best_so_far.h5')
+    t = Pod()
+    t.model_body.load_weights('pod_weights_best_so_far.h5')
     t.loaded = True
 
     output_ind = int(args.output_layer)

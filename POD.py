@@ -18,7 +18,7 @@ from yad2k.utils.draw_boxes import draw_boxes
 anchors_path = 'model_data/mot_anchors.txt'
 classes_path = 'model_data/mot_classes.txt'
 
-class Tracker():
+class Pod():
     def __init__(self):
         with open(classes_path) as f:
             self.class_names = f.readlines()
@@ -63,12 +63,13 @@ class Tracker():
         plot_model(self.model_body, to_file='model.png')
 
     def train(self):
+        self.loaded=True
         data = process_MOT_dataset()
         
         model_loss = Lambda(
                 yolo_loss,
                 output_shape=(1, ),
-                name='tracker_loss',
+                name='pod_loss',
                 arguments={'anchors': self.anchors,
                         'num_classes': len(self.class_names),
                         #'rescore_confidence': True,
@@ -81,34 +82,34 @@ class Tracker():
             self.matching_boxes_input], model_loss)
         model.compile(
                 optimizer='RMSprop', loss={
-                    'tracker_loss': lambda y_true, y_pred: y_pred
+                    'pod_loss': lambda y_true, y_pred: y_pred
                 })
         logging = TensorBoard()
-        checkpoint = ModelCheckpoint("tracker_weights_best_so_far.h5", monitor='val_loss',
+        checkpoint = ModelCheckpoint("pod_weights_best_so_far.h5", monitor='val_loss',
                                      save_weights_only=True, save_best_only=True)
         early_stopping = EarlyStopping(monitor='val_loss', min_delta=0, patience=10, verbose=1, mode='auto')
         data = get_all_detector_masks(data, self.anchors)
 
         #Regular generator performs image augmentation
-        generator = VideoSequence(data[0:1], 1,validation=False)
+        generator = VideoSequence(data[3:4], 4,validation=False)
         #valid generator does not perform any image augmentation
-        valid_generator = VideoSequence(data[0:1], 1,validation=True)
+        valid_generator = VideoSequence(data[3:4], 4,validation=True)
 
         #load model
         if not self.loaded:
-            self.model_body.load_weights('tracker_weights_best_so_far.h5')
+            self.model_body.load_weights('pod_weights_best_so_far.h5')
             self.loaded=True
  
         model.fit_generator(generator, epochs = 50, validation_data=valid_generator, shuffle=True, callbacks=[logging,checkpoint,early_stopping])
-        model.save_weights('tracker_weights.h5')
-        self.model_body.save('model_data/tracker.h5')
+        model.save_weights('pod_weights.h5')
+        self.model_body.save('model_data/pod.h5')
 
     def predict_on_images(self, image_1, image_2, image_3, image_4, image_5):
         sess = K.get_session()
         #load model
         if not self.loaded:
-            self.model_body = load_model('model_data/tracker.h5')
-            self.model_body.load_weights('tracker_weights_best_so_far.h5')
+            self.model_body = load_model('model_data/pod.h5')
+            self.model_body.load_weights('pod_weights_best_so_far.h5')
             self.loaded=True
     
         yolo_outputs = yolo_head(self.model_body.output, self.anchors, len(self.class_names)) 
@@ -196,7 +197,6 @@ class Tracker():
             else:
                 text_origin = np.array([left, top + 1])
     
-            # My kingdom for a good redistributable image drawing library.
             for i in range(thickness):
                 draw.rectangle(
                     [left + i, top + i, right - i, bottom - i],
@@ -207,5 +207,5 @@ class Tracker():
             draw.text(text_origin, label, fill=(0, 0, 0), font=font)
             del draw
     
-        image_6_data.save('predicted_tracker.jpg', quality=90)
+        image_6_data.save('predicted_pod.jpg', quality=90)
         return image_6_data

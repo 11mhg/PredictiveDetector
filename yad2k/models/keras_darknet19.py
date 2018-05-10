@@ -65,8 +65,8 @@ def bottleneck_x2_block(outer_filters, bottleneck_filters):
         DarknetConv2D_BN_Leaky(outer_filters, (3, 3)))
 
 
+
 def darknet_body():
-    """Generate first 18 conv layers of Darknet-19."""
     return compose(
         DarknetConv2DLSTM_BN_Leaky(32, (3, 3)),
         MaxPooling2D(),
@@ -82,6 +82,40 @@ def darknet_body():
         MaxPooling2D(),
         bottleneck_x2_block(1024, 512))
 
+
+
+
+def PODnet_body():
+    return compose(
+        DarknetConv2DLSTM_BN_Leaky(32, (3, 3)),
+        MaxPooling2D(),
+        #DarknetConv2D_BN_Leaky(32, (3,3)),
+        #MaxPooling2D(),
+        DarknetConv2D_BN_Leaky(64, (3, 3)),
+        MaxPooling2D(),
+        bottleneck_block(128, 64),
+        MaxPooling2D(),
+        bottleneck_block(256, 128),
+        MaxPooling2D(),
+        bottleneck_x2_block(512, 256),
+        MaxPooling2D(),
+        bottleneck_x2_block(1024, 512))
+
+
+    def small_darknet_body():
+        return compose(
+            DarknetConv2DLSTM_BN_Leaky(16,(3,3)),
+            MaxPooling2D(),
+            DarknetConv2DLSTM_BN_Leaky(32,(3,3)),
+            MaxPooling2D(),
+            DarknetConv2DLSTM_BN_Leaky(64,(3,3)),
+            MaxPooling2D(),
+            DarknetConv2DLSTM_BN_Leaky(128,(3,3)),
+            MaxPooling2D,
+            DarknetConv2DLSTM_BN_Leaky(256,(3,3)),
+            MaxPooling2D(),
+            DarknetConv2DLSTM_BN_Leaky(512,(3,3)),
+            DarknetConv2DLSTM_BN_Leaky(1024,(3,3)))
 
 def darknet19(inputs):
     """Generate Darknet-19 model for Imagenet classification."""

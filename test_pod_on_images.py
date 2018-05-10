@@ -1,7 +1,7 @@
 import tensorflow as tf
 import numpy as np
 import os
-from tracker import *
+from pod import *
 
 img_dir = './Dataset/MOT/images/train/MOT17-02/img1/'
 
@@ -11,7 +11,7 @@ frame_3 = 2
 frame_4 = 3
 frame_5 = 4
 
-t = Tracker()
+t = Pod()
 
 
 for i in range(1):
