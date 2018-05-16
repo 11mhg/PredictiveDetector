@@ -5,7 +5,7 @@ from preprocess import *
 from keras import backend as K
 from keras.models import load_model
 from PIL import Image, ImageDraw, ImageFont
-from pod import *
+from POD import *
 import numpy as np
 import matplotlib as mpl
 mpl.use('Agg')
@@ -43,8 +43,7 @@ def evaluate():
        anchors = np.array(anchors).reshape(-1,2)
 
 
-    data = process_MOT_dataset()
-    data = data[0:1] 
+    data = process_MOT_dataset(valid=True) 
     nb_classes = len(labels)
     nb_anchors = len(anchors)
     
@@ -55,31 +54,22 @@ def evaluate():
         counter = 0
         K.clear_session()
         t=Pod()
+        images_dir = []
         for frame_id in sorted(video['frame'].keys()):
             if (frame_id%50==0):
-                break
                 K.clear_session()
                 t=Pod()
             if (frame_id==len(video['frame'])-1):
                 break
-            counter+=1
-            if counter == 1:
-                img_1 = img_dir+str(frame_id).zfill(6)+'.jpg'
-            elif counter == 2:
-                img_2 = img_dir+str(frame_id).zfill(6)+'.jpg'
-            elif counter == 3:
-                img_3 = img_dir + str(frame_id).zfill(6)+'.jpg'
-            elif counter == 4:
-                img_4 = img_dir + str(frame_id).zfill(6)+'.jpg'
-            elif counter == 5:
-                print(frame_id)
-                img_5 = img_dir + str(frame_id).zfill(6)+'.jpg'
-                counter = 4
-                out_boxes, out_scores, out_classes, _ = t.predict_on_images(img_1, img_2,img_3,img_4, img_5)
-                img_1 = img_2
-                img_2 = img_3
-                img_3 = img_4
-                img_4 = img_5
+
+            if counter < t.sequence_length:
+                images_dir.append(img_dir+str(frame_id).zfill(6)+'.jpg')
+            else:  
+                img_out = img_dir + str(frame_id).zfill(6)+'.jpg'
+                counter = t.sequence_length - 1
+                out_boxes, out_scores, out_classes = t.predict_on_images(images_dir)
+                images_dir = [images_dir[i] for i in range(1,len(images_dir))]
+                images_dir.append(img_dir+str(frame_id).zfill(6)+'.jpg')
                 print("Found {} number of boxes".format(len(out_boxes)))
                 pred_boxes = []
                 pred_classes = []
@@ -88,6 +78,7 @@ def evaluate():
                     predicted_class = labels[c]
                     box = out_boxes[i]
                     score = out_scores[i]
+                    #left, bottom,right,top
                     box = np.array([box[1],box[2],box[3],box[0]])
                     pred_boxes.append(box)
                     pred_classes.append(c)
@@ -95,22 +86,24 @@ def evaluate():
                 pred_boxes = np.array(pred_boxes)
                 pred_classes = np.array(pred_classes)
                 pred_confidence = np.array(pred_confidence)
-            
                 true_boxes = []
                 true_classes = []
+                img_width = video['img_width']
+                img_height = video['img_height']
                 for box in video['frame'][frame_id+1]:
-                    x_center = box[0]
-                    y_center = box[1]
-                    box_width = box[2]
-                    box_height = box[3]
+                    x_center = box[0] * img_width
+                    y_center = box[1] * img_height
+                    box_width = box[2] * img_width
+                    box_height = box[3] * img_height
                     box_label = box[4]
 
-                    gt_box = [x_center - (box_width/2.), y_center - (box_height/2.), x_center + (box_width/2.), y_center + (box_height/2.)]
+                    gt_box = [x_center - (box_width/2.), y_center + (box_height/2.), x_center + (box_width/2.), y_center - (box_height/2.)]
                     true_classes.append(box_label)
                     true_boxes.append(np.array(gt_box))
                 true_boxes = np.array(true_boxes)
                 true_classes = np.array(true_classes)
                 frames.append((pred_boxes,pred_classes,pred_confidence,true_boxes,true_classes))
+            counter+=1
     evaluate_map(frames,len(labels))
 
 

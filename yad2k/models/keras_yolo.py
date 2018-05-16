@@ -4,12 +4,13 @@ import sys
 import numpy as np
 import tensorflow as tf
 from keras import backend as K
-from keras.layers import Lambda
+from keras.layers import Lambda, Dropout
 from keras.layers.merge import concatenate
 from keras.models import Model
 
 from ..utils import compose
 from .keras_darknet19 import *
+from .keras_custom import *
 
 sys.path.append('..')
 
@@ -39,6 +40,10 @@ def space_to_depth_x2_output_shape(input_shape):
     return (input_shape[0], input_shape[1] // 2, input_shape[2] // 2, 4 *
             input_shape[3]) if input_shape[1] else (input_shape[0], None, None,
                                                     4 * input_shape[3])
+def small_POD_body(inputs, num_anchors, num_classes):
+    podnet = Model(inputs, small_PODnet_body()(inputs))
+    x = DarknetConv2D_BN_Leaky(num_anchors*(num_classes+5),(1,1))(podnet.output)
+    return Model(inputs, x)
 
 
 def yolo_body(inputs, num_anchors, num_classes):
@@ -59,6 +64,35 @@ def yolo_body(inputs, num_anchors, num_classes):
     x = DarknetConv2D_BN_Leaky(1024, (3, 3))(x)
     x = DarknetConv2D(num_anchors * (num_classes + 5), (1, 1))(x)
     return Model(inputs, x)
+
+def yolo3_body(inputs, num_anchors, num_classes):
+    base_yolo3 = Model(inputs,darknet53_body(inputs))
+    x = DarknetConv2D_BN_Leaky(num_anchors*(num_classes+5),(1,1))(base_yolo3.output)
+    yolo3 = Model(inputs,x)
+    yolo3.summary()
+
+def time_body(inputs, num_anchors, num_classes):
+    ''' Create PODnet body '''
+    x = timenet_body(inputs)
+    podnet = Model(inputs, x)
+    with tf.device('/gpu:1'):
+        conv20 = compose(
+            DarknetConv2DLSTM_BN_Leaky(1024, (3, 3),return_sequences=True),
+            DarknetConv2DLSTM_BN_Leaky(1024, (3, 3),return_sequences=True))(podnet.output)
+
+        conv13 = podnet.layers[43].output
+        conv21 = DarknetConv2D_BN_Leaky_TD(64, (1, 1))(conv13)
+
+        conv21_reshaped = TimeDistributed(Lambda(
+            space_to_depth_x2,
+            output_shape=space_to_depth_x2_output_shape,
+            name='space_to_depth'))(conv21)
+
+        x = concatenate([conv21_reshaped, conv20])
+        x = DarknetConv2DLSTM_BN_Leaky(1024, (3, 3))(x)
+        x = DarknetConv2D(num_anchors * (num_classes + 5), (1, 1))(x)
+    return Model(inputs, x)
+
 
 
 def yolo_head(feats, anchors, num_classes):
@@ -124,7 +158,7 @@ def yolo_head(feats, anchors, num_classes):
     box_xy = K.sigmoid(feats[..., :2])
     box_wh = K.exp(feats[..., 2:4])
     box_confidence = K.sigmoid(feats[..., 4:5])
-    box_class_probs = K.softmax(feats[..., 5:])
+    box_class_probs = K.sigmoid(feats[..., 5:])
 
     # Adjust preditions to each spatial grid point and anchor size.
     # Note: YOLO iterates over height index before width index.

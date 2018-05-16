@@ -48,11 +48,7 @@ def get_video(video_source):
 
 
 def get_MOT_as_COCO(valid=False):
-    if not valid:
-        imageDir = 'Dataset/MOT/images/train/'
-    else:
-        imageDir = 'Dataset/MOT/images/test/'
-
+    imageDir = 'Dataset/MOT/images/train/'
     data = []
     for folder in os.listdir(imageDir):
         if '.txt' in folder:
@@ -79,7 +75,7 @@ def get_MOT_as_COCO(valid=False):
             dict_annot['img_width'] = width
             dict_annot['frame'] = {}
             print(height,width)
-            for lines in gt:
+            for index, lines in enumerate(gt):
                 splitline = [float(x.strip()) for x in lines.split(',')]
                 label = int(splitline[7])-1
                 x_val = splitline[2]
@@ -107,10 +103,18 @@ def get_MOT_as_COCO(valid=False):
             dict_annot['img_dir'] = imageDir+folder+'/img1/'
             data.append(dict_annot)
     for video in data:
-        for frame_id in video['frame']:
+        threshold = int(0.8*len(video['frame']))
+        new_video = {}
+        for index, frame_id in enumerate(video['frame']):
+            if valid and index < threshold:
+                continue
+            if not valid and index > threshold:
+                continue
             boxes = video['frame'][frame_id]
             boxes = np.array(boxes)
-            video['frame'][frame_id] = boxes
+            new_video[frame_id] = boxes
+        video['frame'] = new_video
+        print("Video size is : "+str(len(new_video)))
     if not valid:
         with open(b'MOT-train.obj', 'wb') as f:
             pickle.dump(data, f)

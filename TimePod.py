@@ -14,14 +14,12 @@ from keras.models import Model
 from PIL import ImageFont, ImageDraw, Image
 from yad2k.models.keras_yolo import *
 from yad2k.utils.draw_boxes import draw_boxes
-from keras.backend.tensorflow_backend import set_session
 
 anchors_path = 'model_data/mot_anchors.txt'
 classes_path = 'model_data/mot_classes.txt'
 
 class Pod():
-    def __init__(self, model_type='POD'):
-        self.model_type = model_type
+    def __init__(self):
         with open(classes_path) as f:
             self.class_names = f.readlines()
         self.class_names = [c.strip() for c in self.class_names]
@@ -33,7 +31,7 @@ class Pod():
 
         self.score_threshold = 0.3
         self.iou_threshold = 0.5
-        self.sequence_length = 5
+        self.sequence_length = 2
 
         self.evaluated = False
 
@@ -49,15 +47,6 @@ class Pod():
 
         self.loaded=False
 
-        '''
-        Some session configuration
-        '''
-        config = tf.ConfigProto(allow_soft_placement=True)
-        config.gpu_options.allow_growth = True
-        sess = tf.Session(config=config)
-        set_session(sess)
-
-
         self.image_shape = (608,608)
         self.detectors_mask_shape = (19,19,5,1) 
         self.matching_boxes_shape = (19,19,5,5)
@@ -67,17 +56,15 @@ class Pod():
         self.detectors_mask_input = Input(shape=self.detectors_mask_shape)
         self.matching_boxes_input = Input(shape=self.matching_boxes_shape)
 
-        if self.model_type == 'POD':
-            self.model_body = yolo_body(self.image_input,len(self.anchors),len(self.class_names))
-        elif self.model_type == 'tiny_POD':
-            self.model_body = small_POD_body(self.image_input, len(self.anchors), len(self.class_names))
+        self.model_body = time_body(self.image_input,len(self.anchors),len(self.class_names))
+
         self.model_body = Model(self.image_input, self.model_body.output)
 
         self.model_body.summary()
-        plot_model(self.model_body, to_file='model_{}.png'.format(self.model_type))
+        plot_model(self.model_body, to_file='model.png')
 
     def train(self):
-
+        self.loaded=True
         data = process_MOT_dataset(valid=False)
         valid_data = process_MOT_dataset(valid=True)
         
@@ -100,7 +87,7 @@ class Pod():
                     'pod_loss': lambda y_true, y_pred: y_pred
                 })
         logging = TensorBoard()
-        checkpoint = ModelCheckpoint("pod_{}_weights_best_so_far.h5".format(self.model_type), monitor='val_loss',
+        checkpoint = ModelCheckpoint("pod_weights_best_so_far.h5", monitor='val_loss',
                                      save_weights_only=True, save_best_only=True)
         early_stopping = EarlyStopping(monitor='val_loss', min_delta=0, patience=7, verbose=1, mode='auto')
         data = get_all_detector_masks(data, self.anchors)
@@ -112,37 +99,57 @@ class Pod():
 
         #load model
         if not self.loaded:
-            self.model_body.load_weights('pod_{}_weights_best_so_far.h5'.format(self.model_type))
+            self.model_body.load_weights('pod_weights_best_so_far.h5')
             self.loaded=True
  
         model.fit_generator(generator, epochs = 50, validation_data=valid_generator, shuffle=False, callbacks=[logging,checkpoint,early_stopping])
-        model.save_weights('pod_{}_weights.h5'.format(self.model_type))
-        self.model_body.save('model_data/pod_{}.h5'.format(self.model_type))
+        model.save_weights('pod_weights.h5')
+        self.model_body.save('model_data/pod.h5')
 
-    def predict_on_images(self, images):
+    def predict_on_images(self, image_1, image_2, image_3, image_4, image_5):
         sess = K.get_session()
         #load model
         if not self.loaded:
-            self.model_body = load_model('model_data/pod_{}.h5'.format(self.model_type))
-            self.model_body.load_weights('pod_{}_weights_best_so_far.h5'.format(self.model_type))
+            self.model_body = load_model('model_data/pod.h5')
+            self.model_body.load_weights('pod_weights_best_so_far.h5')
             self.loaded=True
+    
         yolo_outputs = yolo_head(self.model_body.output, self.anchors, len(self.class_names)) 
         
         input_image_shape = K.placeholder(shape=(2, ))
         boxes, scores, classes = yolo_eval(
                 yolo_outputs,
                 input_image_shape,
-                max_boxes = 30,
                 score_threshold = 0.1,
                 iou_threshold = 0.5)
     
-        images_data_init = [Image.open(image) for image in images]
+        image_1_data_init = Image.open(image_1)
+        image_2_data_init = Image.open(image_2)
+        image_3_data_init = Image.open(image_3)
+        image_4_data_init = Image.open(image_4)
+        image_5_data_init = Image.open(image_5)
 
-        images_data = [image.resize((608,608),Image.BICUBIC) for image in images_data_init]
 
-        images_data = [np.array(image,dtype='float32') for image in images_data]
+        image_1_data = image_1_data_init.resize((608,608), Image.BICUBIC)
+        image_2_data = image_2_data_init.resize((608,608), Image.BICUBIC)
+        image_3_data = image_3_data_init.resize((608,608), Image.BICUBIC)
+        image_4_data = image_4_data_init.resize((608,608), Image.BICUBIC)
+        image_5_data = image_5_data_init.resize((608,608), Image.BICUBIC) 
+    
+        image_1_data = np.array(image_1_data, dtype='float32')
+        image_2_data = np.array(image_2_data, dtype='float32')
+        image_3_data = np.array(image_3_data, dtype='float32')
+        image_4_data = np.array(image_4_data, dtype='float32')
+        image_5_data = np.array(image_5_data, dtype='float32')
 
-        images_data = [image/255. for image in images_data] 
+    
+        image_1_data /=255.
+        image_2_data /=255.
+        image_3_data /=255.
+        image_4_data /=255.
+        image_5_data /=255.
+     
+        images_data = [image_1_data, image_2_data, image_3_data, image_4_data, image_5_data]
 
         images_data = np.expand_dims(images_data,0)
 
@@ -151,20 +158,23 @@ class Pod():
                               [boxes, scores, classes],
                               feed_dict={
                                   self.model_body.input: images_data,
-                                  input_image_shape: [images_data_init[0].size[1], images_data_init[0].size[0]],
+                                  input_image_shape: [image_1_data_init.size[1], image_1_data_init.size[0]],
                                   K.learning_phase(): 0
                               })
         end = int(round(time.time()*1000))
         print("Time taken is "+str(end-start)+" ms")
-        return out_boxes, out_scores, out_classes
+        image_6 = os.path.splitext(os.path.basename(image_5))[0]
+        image_6 = os.path.dirname(image_5)+'/'+str(int(image_6)+1).zfill(6)+'.jpg'
+        #sess.close()
+        return out_boxes, out_scores, out_classes, image_6
 
-    def draw_image(self,out_boxes, out_scores, out_classes, image_out):
-        print('Found {} boxes for {}'.format(len(out_boxes),image_out))
-        image_data = Image.open(image_out)
+    def draw_image(self,out_boxes, out_scores, out_classes, image_6):
+        print('Found {} boxes for {}'.format(len(out_boxes),image_6))
+        image_6_data = Image.open(image_6)
         font = ImageFont.truetype(
                          font='font/FiraMono-Medium.otf',
-                         size=np.floor(3e-2 * image_data.size[1] + 0.5).astype('int32'))
-        thickness = (image_data.size[0] + image_data.size[1]) // 300
+                         size=np.floor(3e-2 * image_6_data.size[1] + 0.5).astype('int32'))
+        thickness = (image_6_data.size[0] + image_6_data.size[1]) // 300
     
         for i, c in reversed(list(enumerate(out_classes))):
             predicted_class = self.class_names[c]
@@ -172,7 +182,7 @@ class Pod():
             score = out_scores[i]
             label = '{} {:.2f}'.format(predicted_class, score)
     
-            draw = ImageDraw.Draw(image_data)
+            draw = ImageDraw.Draw(image_6_data)
             label_size = draw.textsize(label, font)
     
             top, left, bottom, right = box
@@ -199,5 +209,5 @@ class Pod():
             draw.text(text_origin, label, fill=(0, 0, 0), font=font)
             del draw
     
-        image_data.save('predicted_pod_{}.jpg'.format(self.model_type), quality=90)
-        return image_data
+        image_6_data.save('predicted_pod.jpg', quality=90)
+        return image_6_data
