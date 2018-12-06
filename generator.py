@@ -54,7 +54,7 @@ class VideoSequence(Sequence):
                 if counter >= self.seq:
                     temp_frame_boxes = np.array(video['frame'][frame_id])
                     temp_frame_detector_mask = video['detector_mask'][frame_id][0]
-                    temp_frame_matching_true_boxes = video['detector_mask'][frame_id][1][:5]
+                    temp_frame_matching_true_boxes = video['detector_mask'][frame_id][1]
                     temp_frame_true_grid = np.expand_dims(cur_true_grids[frame_id],-1)
                     self.pdata.append(temp_frame_images+[temp_frame_boxes,temp_frame_detector_mask, temp_frame_matching_true_boxes,temp_frame_true_grid])
                     temp_frame_images = [temp_frame_images[i] for i in range(1,len(temp_frame_images))]

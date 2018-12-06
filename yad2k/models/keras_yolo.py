@@ -410,7 +410,7 @@ def preprocess_true_boxes(true_boxes, anchors, image_size):
     assert width % 32 == 0, 'Image sizes in YOLO_v2 must be multiples of 32.'
     conv_height = height // 32
     conv_width = width // 32
-    num_box_params = true_boxes.shape[1]
+    num_box_params = true_boxes.shape[1]-1
     detectors_mask = np.zeros(
         (conv_height, conv_width, num_anchors, 1), dtype=np.float32)
     matching_true_boxes = np.zeros(
@@ -451,8 +451,7 @@ def preprocess_true_boxes(true_boxes, anchors, image_size):
                 [
                     box[0] - j, box[1] - i,
                     np.log(box[2] / anchors[best_anchor][0]),
-                    np.log(box[3] / anchors[best_anchor][1]), box_class,
-                    box_id
+                    np.log(box[3] / anchors[best_anchor][1]), box_class
                 ],
                 dtype=np.float32)
             matching_true_boxes[i, j, best_anchor] = adjusted_box

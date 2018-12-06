@@ -113,19 +113,6 @@ class Pod():
         true_grid = true_to_grid(data,self.image_shape[0]//32,self.image_shape[1]//32,self.class_names,self.anchors)
         val_true_grid = true_to_grid(valid_data,self.image_shape[0]//32,self.image_shape[1]//32,self.class_names,self.anchors)
 
-        for ind in range(len(data)):
-            frames = data[ind]['frame']
-            for f in frames.keys():
-                frames[f] = frames[f][:,:5]
-            data[ind]['frame'] = frames
-        for ind in range(len(valid_data)):
-            frames = valid_data[ind]['frame']
-            for f in frames.keys():
-                frames[f] = frames[f][:,:5]
-            valid_data[ind]['frame'] = frames
-
-
-
         data = get_all_detector_masks(data, self.anchors)
         valid_data = get_all_detector_masks(valid_data, self.anchors)
         
