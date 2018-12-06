@@ -9,6 +9,7 @@ import cv2
 from keras.models import load_model
 import h5py
 import pickle
+from tqdm import tqdm
 
 dict_MOT = {1:'Pedestrian',2:'Person on vehicle',3:'Car',4:'Bicycle',5:'Motorbike',6:'Non motorized vehicle',7:'static person',8:'distractor',9:'occluder',10:'occluder on the ground',11:'occluder full',12:'Reflection'}
 
@@ -50,7 +51,9 @@ def get_video(video_source):
 def get_MOT_as_COCO(valid=False):
     imageDir = 'Dataset/MOT/images/train/'
     data = []
-    for folder in os.listdir(imageDir):
+    pbar = tqdm(os.listdir(imageDir))
+    pbar.set_description("Reading in Data")
+    for folder in pbar:
         if '.txt' in folder:
             continue
         height = 0
@@ -74,7 +77,6 @@ def get_MOT_as_COCO(valid=False):
             dict_annot['img_height'] = height
             dict_annot['img_width'] = width
             dict_annot['frame'] = {}
-            print(height,width)
             for index, lines in enumerate(gt):
                 splitline = [float(x.strip()) for x in lines.split(',')]
                 label = int(splitline[7])-1
@@ -82,6 +84,7 @@ def get_MOT_as_COCO(valid=False):
                 y_val = splitline[3]
                 box_width = splitline[4]
                 box_height = splitline[5]
+                object_id = int(splitline[1])
 
                 x_center = x_val + (box_width/2.)
                 y_center = y_val + (box_height/2.)
@@ -91,7 +94,7 @@ def get_MOT_as_COCO(valid=False):
                 box_width = max(0,min(0.999999999,box_width/width))
                 box_height = max(0,min(0.99999999,box_height/height))
 
-                box = [x_center, y_center, box_width, box_height, label]
+                box = [x_center, y_center, box_width, box_height, label,object_id]
                 box = np.array(box)
 
                 frame_id =int(splitline[0])
@@ -102,7 +105,9 @@ def get_MOT_as_COCO(valid=False):
                     dict_annot['frame'][frame_id].append(box)
             dict_annot['img_dir'] = imageDir+folder+'/img1/'
             data.append(dict_annot)
-    for video in data:
+    pbar = tqdm(data)
+    pbar.set_description("Formatting Data properly and making sure frames are in order.")
+    for video in pbar:
         threshold = int(0.8*len(video['frame']))
         new_video = {}
         for index, frame_id in enumerate(video['frame']):
@@ -114,11 +119,9 @@ def get_MOT_as_COCO(valid=False):
             boxes = np.array(boxes)
             new_video[frame_id] = boxes
         video['frame'] = new_video
-        print("Video size is : "+str(len(new_video)))
     if not valid:
         with open(b'MOT-train.obj', 'wb') as f:
             pickle.dump(data, f)
-
     else:
         with open(b'MOT-test.obj', 'wb') as f:
             pickle.dump(data, f)

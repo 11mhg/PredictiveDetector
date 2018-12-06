@@ -5,17 +5,19 @@ import PIL
 import math
 import imgaug as ia
 from imgaug import augmenters as iaa
+from ldljutils import *
 #needs to be in [image_data_1, image_data_2, boxes, detectors_masks, matching_true_boxes]
 
 class VideoSequence(Sequence):
-    def __init__(self, data, sequence_size, batch_size,validation=False):
+    def __init__(self, data, true_grid, sequence_size, batch_size,validation=False,image_shape=(608,608),dtype=np.float32):
         self.data = data
+        self.true_grid = true_grid
         self.batch_size = batch_size
         self.seq = sequence_size
         self.pdata = []
         self.validation=validation
-        self.jitter = True 
-
+        self.jitter = True
+        self.dtype=dtype
         sometimes = lambda aug: iaa.Sometimes(0.5, aug)
 
         self.aug_pipe = iaa.Sequential(
@@ -40,18 +42,21 @@ class VideoSequence(Sequence):
             random_order=True
         )
 
-        for video in self.data:
+        for i, video in enumerate(self.data):
+            cur_true_grids = self.true_grid[i]
             temp_frame_boxes = []
             temp_frame_images = []
             temp_frame_detector_masks = []
             temp_frame_matching_true_boxes = []
+            temp_frame_true_grid = []
             counter = 0
             for frame_id in sorted(video['frame'].keys()):
                 if counter >= self.seq:
                     temp_frame_boxes = np.array(video['frame'][frame_id])
                     temp_frame_detector_mask = video['detector_mask'][frame_id][0]
-                    temp_frame_matching_true_boxes = video['detector_mask'][frame_id][1]
-                    self.pdata.append(temp_frame_images+[temp_frame_boxes,temp_frame_detector_mask, temp_frame_matching_true_boxes])
+                    temp_frame_matching_true_boxes = video['detector_mask'][frame_id][1][:5]
+                    temp_frame_true_grid = np.expand_dims(cur_true_grids[frame_id],-1)
+                    self.pdata.append(temp_frame_images+[temp_frame_boxes,temp_frame_detector_mask, temp_frame_matching_true_boxes,temp_frame_true_grid])
                     temp_frame_images = [temp_frame_images[i] for i in range(1,len(temp_frame_images))]
                     temp_frame_images.append(video['img_dir']+str(frame_id).zfill(6)+'.jpg')
                     counter = self.seq - 1
@@ -75,6 +80,7 @@ class VideoSequence(Sequence):
         input_boxes = []
         input_mask = []
         input_true_boxes = []
+        input_true_grids = []
         batch_y = []
         for index, elem in enumerate(batch):
             images = [PIL.Image.open(elem[i]) for i in range(self.seq-1)]
@@ -95,6 +101,7 @@ class VideoSequence(Sequence):
             boxes = np.array(temp)
             mask = elem[self.seq+1]
             true_boxes = elem[self.seq+2]
+            true_grid = elem[self.seq+3]
             if input_images == []:
                 input_images.append([np.array(images)])
             else:
@@ -102,6 +109,7 @@ class VideoSequence(Sequence):
             input_boxes.append(boxes)
             input_mask.append(mask)
             input_true_boxes.append(true_boxes)
+            input_true_grids.append(true_grid)
             batch_y.append(np.zeros(len(images)))
         max_boxes = 0
         for boxz in input_boxes:
@@ -113,5 +121,7 @@ class VideoSequence(Sequence):
                 zero_padding = np.zeros( (max_boxes - boxz.shape[0], 5), dtype=np.float32)
                 input_boxes[i] = np.vstack((boxz, zero_padding))
         #final input info requires images in sequence and per batch
-        return [np.array(image_batch) for image_batch in input_images]+[np.array(input_boxes), np.array(input_mask),np.array(input_true_boxes)] , np.array(batch_y)
+        return [np.array(image_batch,dtype=self.dtype) for image_batch in input_images]+[np.array(input_boxes), np.array(input_mask),np.array(input_true_boxes),np.array(input_true_grids)] , np.array(batch_y)
+    
+
 

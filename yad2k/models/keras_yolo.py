@@ -222,7 +222,7 @@ def yolo_loss(args,
     mean_loss : float
         mean localization loss across minibatch
     """
-    (yolo_output, true_boxes, detectors_mask, matching_true_boxes) = args
+    (yolo_output, true_boxes, detectors_mask, matching_true_boxes, true_grid) = args
     num_anchors = len(anchors)
     object_scale = 5
     no_object_scale = 1
@@ -420,6 +420,7 @@ def preprocess_true_boxes(true_boxes, anchors, image_size):
     for box in true_boxes:
         # scale box to convolutional feature spatial dimensions
         box_class = box[4:5]
+        box_id = box[5:6]
         box = box[0:4] * np.array(
             [conv_width, conv_height, conv_width, conv_height])
         i = np.floor(box[1]).astype('int')
@@ -450,7 +451,8 @@ def preprocess_true_boxes(true_boxes, anchors, image_size):
                 [
                     box[0] - j, box[1] - i,
                     np.log(box[2] / anchors[best_anchor][0]),
-                    np.log(box[3] / anchors[best_anchor][1]), box_class
+                    np.log(box[3] / anchors[best_anchor][1]), box_class,
+                    box_id
                 ],
                 dtype=np.float32)
             matching_true_boxes[i, j, best_anchor] = adjusted_box

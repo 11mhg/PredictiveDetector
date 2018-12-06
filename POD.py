@@ -3,7 +3,7 @@ from preprocess import *
 from generator import *
 import numpy as np
 from keras.optimizers import SGD, Adam, RMSprop
-from keras.callbacks import EarlyStopping, ModelCheckpoint, TensorBoard
+from keras.callbacks import EarlyStopping, ModelCheckpoint, TensorBoard, ReduceLROnPlateau
 import random
 import time
 import colorsys
@@ -15,17 +15,22 @@ from PIL import ImageFont, ImageDraw, Image
 from yad2k.models.keras_yolo import *
 from yad2k.utils.draw_boxes import draw_boxes
 from keras.backend.tensorflow_backend import set_session
+import keras.backend as K
+from ldljutils import *
 
 anchors_path = 'model_data/mot_anchors.txt'
 classes_path = 'model_data/mot_classes.txt'
 
 class Pod():
-    def __init__(self, model_type='POD'):
+    def __init__(self, model_type='POD',dtype='float32'):
         self.model_type = model_type
+        self.dtype=dtype
+        if self.dtype=='float16':
+            K.set_floatx('float16')
+        
         with open(classes_path) as f:
             self.class_names = f.readlines()
         self.class_names = [c.strip() for c in self.class_names]
-
         with open(anchors_path) as f:
             self.anchors = f.readline()
             self.anchors = [float(x) for x in self.anchors.split(',')]
@@ -33,7 +38,7 @@ class Pod():
 
         self.score_threshold = 0.3
         self.iou_threshold = 0.5
-        self.sequence_length = 5
+        self.sequence_length = 5 
 
         self.evaluated = False
 
@@ -66,6 +71,7 @@ class Pod():
         self.boxes_input = Input(shape=(None,5))
         self.detectors_mask_input = Input(shape=self.detectors_mask_shape)
         self.matching_boxes_input = Input(shape=self.matching_boxes_shape)
+        self.true_grid_input = Input(shape=self.detectors_mask_shape)
 
         if self.model_type == 'POD':
             self.model_body = yolo_body(self.image_input,len(self.anchors),len(self.class_names))
@@ -74,13 +80,12 @@ class Pod():
         self.model_body = Model(self.image_input, self.model_body.output)
 
         self.model_body.summary()
-        plot_model(self.model_body, to_file='model_{}.png'.format(self.model_type))
+#        plot_model(self.model_body, to_file='model_{}.png'.format(self.model_type))
 
     def train(self):
-
         data = process_MOT_dataset(valid=False)
         valid_data = process_MOT_dataset(valid=True)
-        
+
         model_loss = Lambda(
                 yolo_loss,
                 output_shape=(1, ),
@@ -90,32 +95,56 @@ class Pod():
                         #'rescore_confidence': True,
                         'print_loss': False})([
                             self.model_body.output, self.boxes_input,
-                            self.detectors_mask_input, self.matching_boxes_input
+                            self.detectors_mask_input, self.matching_boxes_input,
+                            self.true_grid_input
                         ])
         model = Model(
             [self.image_input, self.boxes_input, self.detectors_mask_input,
-            self.matching_boxes_input], model_loss)
+            self.matching_boxes_input,self.true_grid_input], model_loss)
         model.compile(
                 optimizer='RMSprop', loss={
                     'pod_loss': lambda y_true, y_pred: y_pred
                 })
         logging = TensorBoard()
+        reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=5,min_lr=1.**-5)
         checkpoint = ModelCheckpoint("pod_{}_weights_best_so_far.h5".format(self.model_type), monitor='val_loss',
                                      save_weights_only=True, save_best_only=True)
-        early_stopping = EarlyStopping(monitor='val_loss', min_delta=0, patience=7, verbose=1, mode='auto')
+        early_stopping = EarlyStopping(monitor='val_loss', min_delta=0, patience=20, verbose=1, mode='auto')
+        true_grid = true_to_grid(data,self.image_shape[0]//32,self.image_shape[1]//32,self.class_names,self.anchors)
+        val_true_grid = true_to_grid(valid_data,self.image_shape[0]//32,self.image_shape[1]//32,self.class_names,self.anchors)
+
+        for ind in range(len(data)):
+            frames = data[ind]['frame']
+            for f in frames.keys():
+                frames[f] = frames[f][:,:5]
+            data[ind]['frame'] = frames
+        for ind in range(len(valid_data)):
+            frames = valid_data[ind]['frame']
+            for f in frames.keys():
+                frames[f] = frames[f][:,:5]
+            valid_data[ind]['frame'] = frames
+
+
+
         data = get_all_detector_masks(data, self.anchors)
         valid_data = get_all_detector_masks(valid_data, self.anchors)
+        
         #Regular generator performs image augmentation
-        generator = VideoSequence(data,self.sequence_length, 1,validation=False)
-        #valid generator does not perform any image augmentation
-        valid_generator = VideoSequence(valid_data,self.sequence_length, 1,validation=True)
-
+        if self.dtype=='float32':
+            generator = VideoSequence(data,true_grid,self.sequence_length, 1,validation=False,dtype=np.float32)
+            #valid generator does not perform any image augmentation
+            valid_generator = VideoSequence(valid_data,val_true_grid,self.sequence_length, 1,validation=True,dtype=np.float32)
+        else:
+            generator = VideoSequence(data,true_grid,self.sequence_length, 1,validation=False,dtype=np.float16)
+            valid_generator = VideoSequence(valid_data,val_true_grid,self.sequence_length, 1,validation=True,dtype=np.float16)
         #load model
         if not self.loaded:
-            self.model_body.load_weights('pod_{}_weights_best_so_far.h5'.format(self.model_type))
+            if os.path.exists('pod_{}_weights_best_so_far.h5'.format(self.model_type)):
+                print("Weights found, loading now.")
+                self.model_body.load_weights('pod_{}_weights_best_so_far.h5'.format(self.model_type))
             self.loaded=True
  
-        model.fit_generator(generator, epochs = 50, validation_data=valid_generator, shuffle=False, callbacks=[logging,checkpoint,early_stopping])
+        model.fit_generator(generator, epochs = 200, validation_data=valid_generator, shuffle=False, callbacks=[logging,checkpoint,early_stopping,reduce_lr])
         model.save_weights('pod_{}_weights.h5'.format(self.model_type))
         self.model_body.save('model_data/pod_{}.h5'.format(self.model_type))
 
