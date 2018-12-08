@@ -234,7 +234,8 @@ def yolo_loss(args,
         yolo_output, anchors, num_classes)
     
     #get_previous grid ids
-    prev_true_grid = K.zeros(shape=(batch_size,*K.int_shape(true_grid)[1:]))
+    arr = np.zeros((batch_size,*K.int_shape(true_grid)[1:]),dtype=np.float32)
+    prev_true_grid = tf.get_variable(name='prev_true_grid',dtype=tf.float32,initializer=arr)
     
 
     # Unadjusted box predictions for loss.
@@ -247,7 +248,9 @@ def yolo_loss(args,
         (K.sigmoid(feats[..., 0:2]), feats[..., 2:4]), axis=-1)
 
     #get previous grid boxes
-    prev_pred_boxes = K.zeros(shape=(batch_size,yolo_output_shape[1],yolo_output_shape[2],num_anchors,4))
+    print(K.int_shape(pred_boxes))
+    arr = np.zeros((batch_size,19,19,4),dtype=np.float32)
+    prev_pred_boxes = tf.get_variable(name='prev_pred_boxes',dtype=tf.float32,initializer=arr)
 
     # Expand pred x,y,w,h to allow comparison with ground truth.
     # batch, conv_height, conv_width, num_anchors, num_true_boxes, box_params
@@ -293,7 +296,7 @@ def yolo_loss(args,
 
     #Regularization Loss LDLJ
 
-    jerk_loss = Lambda(lambda_ldlj)([true_grid,prev_true_grid,pred_boxes,prev_pred_boxes])
+    jerk_loss = Lambda(lambda_ldlj)([true_grid,prev_true_grid,pred_boxes])
 
 
 
@@ -330,15 +333,15 @@ def yolo_loss(args,
     classification_loss_sum = K.sum(classification_loss)
     coordinates_loss_sum = K.sum(coordinates_loss)
     
-    prev_true_grid = K.update(prev_true_grid,true_grid)
-    prev_pred_boxes = K.update(prev_pred_boxes,pred_boxes)
+    prev_true_grid = prev_true_grid.assign(true_grid,
+            use_locking=False)
 
     normal_loss = 0.5 * (
         confidence_loss_sum + classification_loss_sum + coordinates_loss_sum) 
 
     jerk_loss = (1-jerk_param) * jerk_loss
 
-    total_loss = normal_loss + jerk_loss
+    total_loss = normal_loss #+ jerk_loss
 
     print(type(normal_loss))
     print(type(jerk_loss))
@@ -355,7 +358,7 @@ def yolo_loss(args,
 
 def ldlj_loss(true_grid,prev_true_grid,pred_boxes,prev_pred_boxes):
     batch_size = true_grid.shape[0]
-    loss = 0.0
+#    loss = 0.0
 #    for bs in range(batch_size):
 #        cur_inds = np.argwhere(true_grid>0)
 #        prev_inds = np.argwhere(prev_true_grid>0)
@@ -368,7 +371,7 @@ def ldlj_loss(true_grid,prev_true_grid,pred_boxes,prev_pred_boxes):
 #                else:
 #                   
 
-    return np.array([loss],dtype=np.float32)
+    return np.array([1.5],dtype=np.float32)
 
 def lambda_ldlj(x):
     return tf.py_func(ldlj_loss,x,tf.float32)
