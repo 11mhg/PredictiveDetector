@@ -3,6 +3,26 @@ import os
 import pickle
 from tqdm import tqdm
 from preprocess import *
+import keras
+import keras.backend as K
+
+class ParamScheduler(keras.callbacks.Callback):
+    """
+    Custom parameter scheduler
+    for a particular variable
+    """
+    def __init__(self,var, decay_rate):
+        self.var = var
+        self.decay_rate = decay_rate
+
+    def on_epoch_begin(self,epoch,logs=None):
+        val = float(K.get_value(self.var))
+        K.set_value(self.var,val*(self.decay_rate**epoch))
+
+    def on_epoch_end(self,epoch,logs=None):
+        logs = logs or {}
+        logs['param'] = K.get_value(self.var)
+
 
 def gt_to_yolo(box,h,w):
     #num cells width and height are W H 
@@ -211,4 +231,5 @@ def true_to_grid(datas,grid_H, grid_W, classes, anchors):
             processed_frames[frame_id] = obj_ids
         processed_data.append(processed_frames)
     return processed_data
+
 

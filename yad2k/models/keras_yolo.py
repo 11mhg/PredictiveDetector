@@ -184,7 +184,9 @@ def yolo_boxes_to_corners(box_xy, box_wh):
 def yolo_loss(args,
               anchors,
               num_classes,
+              jerk_param,
               rescore_confidence=False,
+              batch_size=1,
               print_loss=False):
     """YOLO localization loss function.
 
@@ -230,6 +232,10 @@ def yolo_loss(args,
     coordinates_scale = 1
     pred_xy, pred_wh, pred_confidence, pred_class_prob = yolo_head(
         yolo_output, anchors, num_classes)
+    
+    #get_previous grid ids
+    prev_true_grid = K.zeros(shape=(batch_size,*K.int_shape(true_grid)[1:]))
+    
 
     # Unadjusted box predictions for loss.
     yolo_output_shape = K.shape(yolo_output)
@@ -239,6 +245,9 @@ def yolo_loss(args,
     ])
     pred_boxes = K.concatenate(
         (K.sigmoid(feats[..., 0:2]), feats[..., 2:4]), axis=-1)
+
+    #get previous grid boxes
+    prev_pred_boxes = K.zeros(shape=(batch_size,yolo_output_shape[1],yolo_output_shape[2],num_anchors,4))
 
     # Expand pred x,y,w,h to allow comparison with ground truth.
     # batch, conv_height, conv_width, num_anchors, num_true_boxes, box_params
@@ -281,6 +290,13 @@ def yolo_loss(args,
     # A detector has found an object if IOU > thresh for some true box.
     object_detections = K.cast(best_ious > 0.6, K.dtype(best_ious))
 
+
+    #Regularization Loss LDLJ
+
+    jerk_loss = Lambda(lambda_ldlj)([true_grid,prev_true_grid,pred_boxes,prev_pred_boxes])
+
+
+
     # TODO: Darknet region training includes extra coordinate loss for early
     # training steps to encourage predictions to match anchor priors.
 
@@ -313,18 +329,49 @@ def yolo_loss(args,
     confidence_loss_sum = K.sum(confidence_loss)
     classification_loss_sum = K.sum(classification_loss)
     coordinates_loss_sum = K.sum(coordinates_loss)
-    total_loss = 0.5 * (
-        confidence_loss_sum + classification_loss_sum + coordinates_loss_sum)
+    
+    prev_true_grid = K.update(prev_true_grid,true_grid)
+    prev_pred_boxes = K.update(prev_pred_boxes,pred_boxes)
+
+    normal_loss = 0.5 * (
+        confidence_loss_sum + classification_loss_sum + coordinates_loss_sum) 
+
+    jerk_loss = (1-jerk_param) * jerk_loss
+
+    total_loss = normal_loss + jerk_loss
+
+    print(type(normal_loss))
+    print(type(jerk_loss))
+
     if print_loss:
         total_loss = tf.Print(
             total_loss, [
                 total_loss, confidence_loss_sum, classification_loss_sum,
-                coordinates_loss_sum
+                coordinates_loss_sum,jerk_loss,jerk_param
             ],
-            message='yolo_loss, conf_loss, class_loss, box_coord_loss:')
+            message='yolo_loss, conf_loss, class_loss, box_coord_loss,jerk_loss,jerk_param:')
 
     return total_loss
 
+def ldlj_loss(true_grid,prev_true_grid,pred_boxes,prev_pred_boxes):
+    batch_size = true_grid.shape[0]
+    loss = 0.0
+#    for bs in range(batch_size):
+#        cur_inds = np.argwhere(true_grid>0)
+#        prev_inds = np.argwhere(prev_true_grid>0)
+#        for cur_ind in cur_inds:
+#            val = true_grid[cur_ind]
+#            for prev_ind in prev_inds:
+#                prev_val = prev_true_grid[prev_ind]
+#                if val!=prev_val:
+#                    continue
+#                else:
+#                   
+
+    return np.array([loss],dtype=np.float32)
+
+def lambda_ldlj(x):
+    return tf.py_func(ldlj_loss,x,tf.float32)
 
 def yolo(inputs, anchors, num_classes):
     """Generate a complete YOLO_v2 localization model."""

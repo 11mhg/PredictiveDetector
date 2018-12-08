@@ -22,8 +22,10 @@ anchors_path = 'model_data/mot_anchors.txt'
 classes_path = 'model_data/mot_classes.txt'
 
 class Pod():
-    def __init__(self, model_type='POD',dtype='float32'):
+    def __init__(self, model_type='POD',batch_size=1,print_loss=False,dtype='float32'):
         self.model_type = model_type
+        self.batch_size=batch_size
+        self.print_loss = print_loss
         self.dtype=dtype
         if self.dtype=='float16':
             K.set_floatx('float16')
@@ -59,8 +61,8 @@ class Pod():
         '''
         config = tf.ConfigProto(allow_soft_placement=True)
         config.gpu_options.allow_growth = True
-        sess = tf.Session(config=config)
-        set_session(sess)
+        self.sess = tf.Session(config=config)
+        set_session(self.sess)
 
 
         self.image_shape = (608,608)
@@ -83,8 +85,27 @@ class Pod():
 #        plot_model(self.model_body, to_file='model_{}.png'.format(self.model_type))
 
     def train(self):
+        #get the data
         data = process_MOT_dataset(valid=False)
         valid_data = process_MOT_dataset(valid=True)
+        
+        #get all the generators ready
+        true_grid = true_to_grid(data,self.image_shape[0]//32,self.image_shape[1]//32,self.class_names,self.anchors)
+        val_true_grid = true_to_grid(valid_data,self.image_shape[0]//32,self.image_shape[1]//32,self.class_names,self.anchors)
+
+        data = get_all_detector_masks(data, self.anchors)
+        valid_data = get_all_detector_masks(valid_data, self.anchors)
+        
+        #Regular generator performs image augmentation
+        if self.dtype=='float32':
+            generator = VideoSequence(data,true_grid,self.sequence_length, self.batch_size,validation=False,dtype=np.float32)
+            #valid generator does not perform any image augmentation
+            valid_generator = VideoSequence(valid_data,val_true_grid,self.sequence_length, self.batch_size,validation=True,dtype=np.float32)
+        else:
+            generator = VideoSequence(data,true_grid,self.sequence_length, self.batch_size,validation=False,dtype=np.float16)
+            valid_generator = VideoSequence(valid_data,val_true_grid,self.sequence_length, self.batch_size,validation=True,dtype=np.float16)
+       
+        jerk_param = K.variable(1)
 
         model_loss = Lambda(
                 yolo_loss,
@@ -92,8 +113,10 @@ class Pod():
                 name='pod_loss',
                 arguments={'anchors': self.anchors,
                         'num_classes': len(self.class_names),
+                        'jerk_param':jerk_param,
                         #'rescore_confidence': True,
-                        'print_loss': False})([
+                        'batch_size': self.batch_size,
+                        'print_loss': self.print_loss})([
                             self.model_body.output, self.boxes_input,
                             self.detectors_mask_input, self.matching_boxes_input,
                             self.true_grid_input
@@ -110,28 +133,17 @@ class Pod():
         checkpoint = ModelCheckpoint("pod_{}_weights_best_so_far.h5".format(self.model_type), monitor='val_loss',
                                      save_weights_only=True, save_best_only=True)
         early_stopping = EarlyStopping(monitor='val_loss', min_delta=0, patience=20, verbose=1, mode='auto')
-        true_grid = true_to_grid(data,self.image_shape[0]//32,self.image_shape[1]//32,self.class_names,self.anchors)
-        val_true_grid = true_to_grid(valid_data,self.image_shape[0]//32,self.image_shape[1]//32,self.class_names,self.anchors)
-
-        data = get_all_detector_masks(data, self.anchors)
-        valid_data = get_all_detector_masks(valid_data, self.anchors)
         
-        #Regular generator performs image augmentation
-        if self.dtype=='float32':
-            generator = VideoSequence(data,true_grid,self.sequence_length, 1,validation=False,dtype=np.float32)
-            #valid generator does not perform any image augmentation
-            valid_generator = VideoSequence(valid_data,val_true_grid,self.sequence_length, 1,validation=True,dtype=np.float32)
-        else:
-            generator = VideoSequence(data,true_grid,self.sequence_length, 1,validation=False,dtype=np.float16)
-            valid_generator = VideoSequence(valid_data,val_true_grid,self.sequence_length, 1,validation=True,dtype=np.float16)
+        jerk_scheduler = ParamScheduler(jerk_param,0.9)
+        
         #load model
         if not self.loaded:
             if os.path.exists('pod_{}_weights_best_so_far.h5'.format(self.model_type)):
                 print("Weights found, loading now.")
                 self.model_body.load_weights('pod_{}_weights_best_so_far.h5'.format(self.model_type))
             self.loaded=True
- 
-        model.fit_generator(generator, epochs = 200, validation_data=valid_generator, shuffle=False, callbacks=[logging,checkpoint,early_stopping,reduce_lr])
+        
+        model.fit_generator(generator, epochs = 200, validation_data=valid_generator, shuffle=False, callbacks=[logging,checkpoint,early_stopping,reduce_lr,jerk_scheduler])
         model.save_weights('pod_{}_weights.h5'.format(self.model_type))
         self.model_body.save('model_data/pod_{}.h5'.format(self.model_type))
 
