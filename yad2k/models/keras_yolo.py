@@ -236,7 +236,8 @@ def yolo_loss(args,
     #get_previous grid ids
     arr = np.zeros((batch_size,*K.int_shape(true_grid)[1:]),dtype=np.float32)
     prev_true_grid = tf.get_variable(name='prev_true_grid',dtype=tf.float32,initializer=arr)
-    
+    arr = np.zeros((batch_size,*K.int_shape(true_grid)[1:]),dtype=np.float32)
+    old_true_grid = tf.get_variable(name='old_true_grid',dtype=tf.float32,initializer=arr)
 
     # Unadjusted box predictions for loss.
     yolo_output_shape = K.shape(yolo_output)
@@ -249,9 +250,10 @@ def yolo_loss(args,
 
     #get previous grid boxes
     print(K.int_shape(pred_boxes))
-    arr = np.zeros((batch_size,19,19,4),dtype=np.float32)
+    arr = np.zeros((batch_size,19,19,5,4),dtype=np.float32)
     prev_pred_boxes = tf.get_variable(name='prev_pred_boxes',dtype=tf.float32,initializer=arr)
-
+    arr = np.zeros((batch_size,19,19,5,4),dtype=np.float32)
+    old_pred_boxes = tf.get_variable(name='old_pred_boxes',dtype=tf.float32,initializer=arr)
     # Expand pred x,y,w,h to allow comparison with ground truth.
     # batch, conv_height, conv_width, num_anchors, num_true_boxes, box_params
     pred_xy = K.expand_dims(pred_xy, 4)
@@ -296,7 +298,8 @@ def yolo_loss(args,
 
     #Regularization Loss LDLJ
 
-    jerk_loss = Lambda(lambda_ldlj)([true_grid,prev_true_grid,pred_boxes])
+    jerk_loss = Lambda(lambda_ldlj)([true_grid,prev_true_grid,old_true_grid,
+        pred_boxes,prev_pred_boxes,old_pred_boxes])
 
 
 
@@ -332,8 +335,19 @@ def yolo_loss(args,
     confidence_loss_sum = K.sum(confidence_loss)
     classification_loss_sum = K.sum(classification_loss)
     coordinates_loss_sum = K.sum(coordinates_loss)
-    
+   
+    print(old_true_grid,prev_true_grid)
+    print(old_pred_boxes,prev_pred_boxes)
+
+    old_true_grid = old_true_grid.assign(prev_true_grid,
+            use_locking=False)
+    old_pred_boxes = old_pred_boxes.assign(prev_pred_boxes,
+            use_locking=False)
+
     prev_true_grid = prev_true_grid.assign(true_grid,
+            use_locking=False)
+    print(pred_boxes)
+    prev_pred_boxes = prev_pred_boxes.assign(pred_boxes,
             use_locking=False)
 
     normal_loss = 0.5 * (
@@ -342,9 +356,6 @@ def yolo_loss(args,
     jerk_loss = (1-jerk_param) * jerk_loss
 
     total_loss = normal_loss #+ jerk_loss
-
-    print(type(normal_loss))
-    print(type(jerk_loss))
 
     if print_loss:
         total_loss = tf.Print(
@@ -356,22 +367,113 @@ def yolo_loss(args,
 
     return total_loss
 
-def ldlj_loss(true_grid,prev_true_grid,pred_boxes,prev_pred_boxes):
-    batch_size = true_grid.shape[0]
-#    loss = 0.0
-#    for bs in range(batch_size):
-#        cur_inds = np.argwhere(true_grid>0)
-#        prev_inds = np.argwhere(prev_true_grid>0)
-#        for cur_ind in cur_inds:
-#            val = true_grid[cur_ind]
-#            for prev_ind in prev_inds:
-#                prev_val = prev_true_grid[prev_ind]
-#                if val!=prev_val:
-#                    continue
-#                else:
-#                   
+def xywhtoxyxy(arr):
+    arr = np.array(arr)
+    x,y,w,h = np.split(arr,4,axis=1)
+    if x == None or y == None or w == None or h == None:
+        return np.array(arr)
+    x0 = x - w/2.
+    y0 = y - h/2.
+    x1 = x + w/2.
+    y1 = y + h/2.
 
-    return np.array([1.5],dtype=np.float32)
+    return np.array([x0,y0,x1,y1],dtype=np.float32)
+
+def area(arr):
+    return abs((arr[2]-arr[0]+1) * (arr[3]-arr[1]+1))
+
+def iou(b1,b2):
+    b1 = xywhtoxyxy(b1)
+    b2 = xywhtoxyxy(b2)
+
+    x10,y10,x11,y11 = np.split(b1,4,axis=1)
+    x20,y20,x21,y21 = np.split(b2,4,axis=1)
+
+    if x10 == None or y10 == None or x11 == None or y11 == None:
+        if x20 == None or y20 == None or x21 == None or y21 == None:
+            return 0
+        else:
+            return 1
+    if x20 == None or y20 == None or x21 == None or y21 == None:
+        return 0
+
+    xA = max(x10,x20)
+    yA = max(y10,y20)
+    xB = max(x11,y21)
+    yB = max(y11,y21)
+
+    interArea = max(0,xB - xA + 1) * max(0,yB - yA + 1)
+    area1 = area(b1)
+    area2 = area(b2)
+
+    iou = interArea/float(area1+area2 - interArea)
+
+    return iou
+
+def ious(arr):
+    b1,b2,b3 = np.split(arr,3,axis=1)
+    iou1 = iou(b1,b2)
+    iou2 = iou(b2,b3)
+    return np.array([iou1,iou2])
+
+def diff1(ious,fs):
+    dt = 1./fs
+    ious = np.array(ious)
+    iou1 = ious[1:]
+    iou2 = ious[0:-1]
+    out = (iou1-iou2)/dt
+    return out
+
+def dlj_iou(ious,fs):
+    ious = np.array(ious)
+    ious_peak = np.exp(-(max(abs(ious))))
+    dt = 1./fs
+    movement_dur = len(ious)*dt
+    jerk = dff1(ious,dt)
+    scale = pow(movement_dur,5)/pow(ious_peak,2)
+    return -scale * sum(pow(jerk,2))*dt
+
+def ldlj_iou(ious,fs):
+    ldlj_val = -np.log(abs(dlj_iou(ious,fs)))
+    return ldlj_val
+
+
+def ldlj_loss(true_grid,prev_true_grid,old_true_grid,pred_boxes,prev_pred_boxes,old_pred_boxes):
+    batch_size = true_grid.shape[0]
+    loss = 0.0
+    boxes = {}
+    for bs in range(batch_size):
+        bs_boxes = {}
+        for x in range(true_grid.shape[1]):
+            for y in range(true_grid.shape[2]):
+                for a in range(true_grid.shape[3]):
+                    val = true_grid[bs,x,y,a,0]
+                    prev_val = prev_true_grid[bs,x,y,a,0]
+                    old_val = old_true_grid[bs,x,y,a,0]
+                    if val > 0:
+                        if val not in bs_boxes.keys():
+                            bs_boxes[val] = [np.array([None,None,None,None])]*3
+                        bs_boxes[val][2] = pred_boxes[bs,x,y,a,:]
+                    
+                    elif prev_val > 0:
+                        if prev_val not in bs_boxes.keys():
+                            bs_boxes[prev_val] = [np.array([None,None,None,None])]*3
+                        bs_boxes[prev_val][1] = prev_pred_boxes[bs,x,y,a,:]
+                    elif old_val > 0:
+                        if old_val not in bs_boxes.keys():
+                            bs_boxes[old_val] = [np.array([None,None,None,None])]*3
+                        bs_boxes[old_val][0] = old_pred_boxes[bs,x,y,a,:]
+        boxes[bs] = bs_boxes
+    ldlj = []
+    for bs in boxes.keys():
+        for obj in boxes[bs].keys():
+            b = boxes[bs][obj]
+            ious_arr = ious(np.array(b))
+            ldlj.append(abs(ldlj_iou(ious_arr,30.)))
+    ldlj = np.array(ldlj)
+    print(ldlj)
+    input("Wait")
+    return np.array([np.nanmean(ldlj)],dtype=np.float32)
 
 def lambda_ldlj(x):
     return tf.py_func(ldlj_loss,x,tf.float32)
