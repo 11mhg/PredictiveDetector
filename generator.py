@@ -67,7 +67,7 @@ class VideoSequence(Sequence):
 
 #temporarily set to 10 to speed up iterations
     def __len__(self):
-        return 10#math.floor(len(self.pdata)/self.batch_size)
+        return math.floor(len(self.pdata)/self.batch_size)
 
     def aug_image(self, image):
         return np.array(self.aug_pipe.augment_image(np.array(image,dtype=np.uint8)),dtype=np.float)
